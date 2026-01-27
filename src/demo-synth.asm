@@ -15,10 +15,14 @@ LAST_NOTE   = $fe               ; Last note played
 
 * = $1600
 ; Installation routine
+#ifdef MAPLIN
+#else
 Install:    lda #<ISR           ; Set the location of the NMI interrupt service
             sta $0318           ;   routine, which will capture incoming MIDI
             lda #>ISR           ;   messages. Note the lack of SEI/CLI here.
             sta $0319           ;   They would do no good for the NMI.
+#endif
+            jsr MIDIINIT
             jsr SETIN           ; Prepare hardware for MIDI input
             ; Fall through to Main
  
@@ -26,7 +30,14 @@ Install:    lda #<ISR           ; Set the location of the NMI interrupt service
 ; Waits for a complete MIDI message, and then dispatches the message to
 ; message handlers. This dispatching code and the handlers are pretty barbaric.
 ; In real life, you probably won't be able to use relative jumps for everything.
+#ifdef MAPLIN
+Main:       jsr CHKMIDI
+            beq NoInput
+            jsr MAKEMSG
+NoInput:    jsr GETMSG
+#else
 Main:       jsr GETMSG          ; Has a complete MIDI message been received?
+#endif
             bcc Main            ;   If not, just go back and wait
             cmp #ST_NOTEON      ; Is the message a Note On?
             beq NoteOnH         ; If so, handle it

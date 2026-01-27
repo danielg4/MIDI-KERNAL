@@ -99,12 +99,17 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; LABEL DEFINITIONS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+#ifdef MAPLIN
+MC6850      = $9C00
+IOPORT      = MC6850+1
+#else
 ; VIA Registers (VIA#1, Port B)
 DDR         = $9112             ; Data Direction Register
-UPORT       = $9110             ; User Port
+IOPORT      = $9110             ; User Port
 PCR         = $911c             ; Peripheral Control Register
 IFR         = $911d             ; Interrupt flag register
 IER         = $911e             ; Interrupt enable register
+#endif
 
 ; Memory Locations
 MIDIST      = $9e               ; Bits 0-3 = Channel, bits 4-7 = Last Status
@@ -152,6 +157,9 @@ PITCHB:     jmp _PITCHB         ; Pitch bend                                001b
 
 ; MIDI In
 MIDIINIT:                       ; Alias for SETIN
+#ifdef MAPLIN
+            jmp _MIDIINIT
+#endif
 SETIN:      jmp _SETIN          ; Set MIDI port to input mode               001e
 GETCH:      jmp _GETCH          ; Get MIDI channel for message              0021
 SETST:      jmp _SETST          ; Set MIDI status and channel               0024
@@ -169,6 +177,13 @@ GETMSG:     jmp _GETMSG         ; Get complete MIDI message                 0036
 ; Prepare port for MIDI output
 ; Preparations - None
 ; Registers Affected - None
+#ifdef MAPLIN
+_MIDIINIT:  lda #$03
+            sta MC6850
+            lda #$16
+            sta MC6850
+_SETIN:
+#else
 _SETOUT:    pha                 ; Save A for command, etc.
             lda #%11111111      ; Set DDR for output on all lines
             sta DDR             ; ,,
@@ -188,8 +203,12 @@ _SETIN:     lda #%00000000      ; Set DDR for input on all lines
             sta PCR             ; Set PCR for interrupt input mode
             lda #%10001000      ; Enable CB2 interrupt
             sta IER             ; ,,
+#endif
             lda #$ff            ; Initialize message not ready
             sta DATACOUNT       ; ,,
+#ifdef MAPLIN
+_SETOUT:
+#endif
             rts
 
 ; SETCH
@@ -233,8 +252,13 @@ getst_r:    rts
 ; Preparations - SETIN
 ; Registers Affected - A
 ; Return Values - Z flag (clear = new byte at input)
+#ifdef MAPLIN
+_CHKMIDI:   lda #$01
+            bit MC6850
+#else
 _CHKMIDI:   lda #%00001000      ; Check bit 3 of IFR, which indicates
             bit IFR             ;   that the interface has written to the port
+#endif
             rts
             
 ; MIDIIN
@@ -242,7 +266,7 @@ _CHKMIDI:   lda #%00001000      ; Check bit 3 of IFR, which indicates
 ; Preparations - SETIN, CHKMIDI
 ; Registers Affected - A
 ; Return Values - Port value in A
-_MIDIIN:    lda UPORT
+_MIDIIN:    lda IOPORT
             rts
 
 ; NOTEON
@@ -296,15 +320,24 @@ MIDICMD:    ora MIDIST          ; Generic endpoint for a typical
 ; Return Values - Carry flag (clear if acknowledged, set if timeout)
 _MIDIOUT:   pha                 ; Preserve A
             jsr _SETOUT         ; Set output mode
-            sta UPORT           ; Write to port
+            sta IOPORT          ; Write to port
             txa                 ; Preserve X during acknowledgement
             pha                 ;   timeout check
             ldx #0              ; X = Timeout counter
+#ifdef MAPLIN
+            lda #$02
+#else
             lda #%00010000      ; Wait for bit 4 of the interrupt flag
+#endif
 -wait:      dex                 ; Check for interface timeout
             beq timeout         ; ,,
+#ifdef MAPLIN
+            bit MC6850
+            bne wait
+#else
             bit IFR             ; Check interrupt flag for acknowledgement
             beq wait            ;   of MIDI message by the interface
+#endif
             clc
             .byte $34           ; Skip Byte (SKB)
 timeout:    sec
@@ -340,18 +373,27 @@ MIDICMD2:   ora MIDIST          ; Generic endpoint for a two-byte
 ; Preparations - SETIN, CHKMIDI 
 ; Registers Affected - A, X       
 ; Most recent MIDI IN byte is returned in A 
-_MAKEMSG:   jsr _MIDIIN         ; Get the next available MIDI byte
+_MAKEMSG:   ldx DATACOUNT       ; Where are we in the data count?
+            bne make_msg        ; If the message is complete, nothing to do
+            txa
+            rts
+make_msg:   jsr _MIDIIN         ; Get the next available MIDI byte
             pha                 ; Store input byte for return
             bmi new_status      ; If it's a new status byte, prepare for data
-            ldx DATACOUNT       ; Where are we in the data count?
+            txa
             bmi msg_err         ; If no status byte is set, nothing to do
-            beq msg_err         ; If the message is complete, nothing to do
 set_data:   dex                 ; Decrement data byte count; when at 0, message
             stx DATACOUNT       ;   is considered complete.
+            pla
             sta DATA2,x         ; Write the byte to message storage
+            rts
 msg_err:    pla                 ; Return last byte in A
             rts                 ; ,,
-new_status: jsr _SETST          ; Set status byte
+new_status: txa
+            bpl msg_err         ; Not ready for a new status after all
+            pla
+            pha
+            jsr _SETST          ; Set status byte
 set_count:  jsr _MSGSIZE        ; Get message size
             sta DATACOUNT       ; Number of bytes remaining for this message
             pla                 ; Return last byte in A
@@ -361,7 +403,12 @@ set_count:  jsr _MSGSIZE        ; Get message size
 ; Get data size of MIDI message, in data bytes (0, 1, or 2)
 ; Registers Affected - A, X     
 ; Return Values - Number of data bytes in A
-_MSGSIZE:   ldx #13             ; X is the index of the last status message
+_MSGSIZE:   tax
+            and #$F0
+            cmp #$F0
+            bne filterch
+            txa
+filterch:   ldx #13             ; X is the index of the last status message
 -loop:      cmp SizeTableS,x    ; Is this the status we're looking for?
             beq f_st            ; If so, look up the number of data bytes
             dex                 ; Iterate

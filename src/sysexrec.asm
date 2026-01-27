@@ -6,13 +6,19 @@ STORAGE     = $6000
 PT_ST       = $01
 
 * = $1800
+#ifdef MAPLIN
+#else
 ; Installation routine
 Install:    lda #<ISR           ; Set the location of the NMI interrupt service
             sta $0318           ;   routine, which will capture incoming MIDI
             lda #>ISR           ;   messages. Note the lack of SEI/CLI here.
             sta $0319           ;   They would do no good for the NMI.
+#endif
             clc                 ; Clear sysex listen flag
             ror LISTEN          ; ,,
+            jsr MIDIINIT
+#ifdef MAPLIN
+#else
             jmp SETIN           ; Prepare hardware for MIDI input
 
 ; NMI Interrupt Service Routine
@@ -23,9 +29,14 @@ ISR:        pha                 ; NMI does not automatically save registers like
             pha                 ;   ,,
             tya                 ;   ,,
             pha                 ;   ,,
-            jsr CHKMIDI         ; Is this a MIDI-based interrupt?
+#endif
+loop:       jsr CHKMIDI         ; Is this a MIDI-based interrupt?
             bne midi            ;   If so, handle MIDI input
+#ifdef MAPLIN
+            beq loop
+#else
             jmp $feb2           ; Back to normal NMI, after register saves
+#endif
 midi:       jsr MIDIIN
             cmp #$f0            ; If sysex, 
             bne ch_eos          ;   initialize storage pointer
@@ -48,6 +59,12 @@ sy_store:   ldx #0              ; Clear X to use as indirect index
             inc PT_ST           ; Increment storage pointer
             bne r_isr           ; ,,
             inc PT_ST+1         ; ,,
+#ifdef MAPLIN
+            clv
+            bvc loop
+r_isr = loop
+#else
 r_isr:      jmp $ff56           ; Restore registers and return from interrupt
+#endif
 
 #include "./src/midikernal.asm"

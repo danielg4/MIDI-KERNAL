@@ -13,13 +13,26 @@ Start:      jmp Main
 
 #include "./src/midikernal.asm"
 
+#ifdef MAPLIN
+Main:
+#else
 Main:       lda #<ISR           ; Set the location of the NMI interrupt service
             sta $0318           ;   routine, which will capture incoming MIDI
             lda #>ISR           ;   messages. Note the lack of SEI/CLI here.
             sta $0319           ;   They would do no good for the NMI.
+#endif
+            jsr MIDIINIT
             lda #0              ; Channel 1
             jsr SETCH           ; ,,
-start:      lda KEYDOWN         ; Wait for a key press
+start:
+#ifdef MAPLIN
+            jsr CHKMIDI         ; Is this a MIDI-based interrupt?
+            beq no_input        ;   If so, handle MIDI input
+            inc $900f           ; Flash screen color when there's MIDI input
+            jsr MIDIIN          ; Check port to reset interrupt flags
+no_input:
+#endif
+            lda KEYDOWN         ; Wait for a key press
             cmp #$40            ; ,,
             beq start           ; ,,
             sta LASTKEY         ; Take note of key press
