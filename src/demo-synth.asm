@@ -11,7 +11,8 @@ VOLUME      = $900e             ; Volume Register
 VOICE       = $900b             ; Middle Voice Register
 
 ; Program Memory
-LAST_NOTE   = $fe               ; Last note played
+LAST_NOTE   = $fc               ; Last note played
+LAST_VOICE  = $fe
 
 * = $1600
 ; Installation routine
@@ -24,6 +25,11 @@ Install:    lda #<ISR           ; Set the location of the NMI interrupt service
 #endif
             jsr MIDIINIT
             jsr SETIN           ; Prepare hardware for MIDI input
+            ldx #0
+            ldy #2
+InitLoop:   stx LAST_NOTE,y
+            dey
+            bpl InitLoop
             ; Fall through to Main
  
 ; Main Loop
@@ -40,16 +46,23 @@ Main:       jsr GETMSG          ; Has a complete MIDI message been received?
 #endif
             bcc Main            ;   If not, just go back and wait
             cmp #ST_NOTEON      ; Is the message a Note On?
-            beq NoteOnH         ; If so, handle it
+            beq NoteOnOffH      ; If so, handle it
             cmp #ST_NOTEOFF     ; Is it a Note Off?
             beq NoteOffH        ; If so, handle it
             bne Main            ; Go back and wait for more
 
 ; Note Off Handler            
-NoteOffH:   cpx LAST_NOTE       ; X is the note. Is it the last one played?
-            bne Main            ; If not, leave it alone
+NoteOffH:   jsr GetNote
+            bvs Main
+            dey
             lda #0              ; Otherwise, silence the voice
-            sta VOICE           ; ,,
+            sta VOICE,y         ; ,,
+            sta LAST_NOTE,y
+            iny
+            jsr CheckBit
+            eor #$FF
+            and LAST_VOICE
+            sta LAST_VOICE
             jmp Main            ; Go get more MIDI
 
 ; Note On Handler  
@@ -61,25 +74,129 @@ NoteOffH:   cpx LAST_NOTE       ; X is the note. Is it the last one played?
 ;     cmp #LISTEN_CH
 ;     beq ch_ok
 ;     jmp Main   
-NoteOnH:    txa                 ; Put note number in A
-            sta LAST_NOTE       ; Store last note for Note Off
-            cmp #85             ; Check the range for the VIC-20 frequency
-            bcs Main            ;   table. We're allowing note #s 48-85 in
-            cmp #48             ;   this simple demo
+NoteOnOffH: cpx #85             ; Check the range for the VIC-20 frequency
+            bcs Main            ;   table. We're allowing note #s 24-85 in
+            cpx #24             ;   this simple demo
             bcc Main            ;   ,,
-            ;sec                ; Know carry is set from previous cmp
-            sbc #48             ; Subtract 48 to get frequency table index
-            tax                 ; X is the index in frequency table
             tya                 ; Put the velocity in A
+            beq NoteOffH
             lsr                 ; Shift 0vvvvvvv -> 00vvvvvv
             lsr                 ;       00vvvvvv -> 000vvvvv
             lsr                 ;       000vvvvv -> 0000vvvv
             bne setvol          ; Make sure it's at least 1
             lda #1              ; ,,
 setvol:     sta VOLUME          ; Set volume based on high 4 bits of velocity
+            jsr GetNote
+            bmi Main
+            dey
+NoteOnH:    txa                 ; Put note number in A
+            sta LAST_NOTE,y     ; Store last note for Note Off
+            sec                 ; Know carry is set from previous cmp
+            sbc #24             ; Subtract 24 to get frequency table index
+            cpy #0
+            bmi NoteOn
+            beq Tenor
+            sbc #12
+Tenor:      sbc #12
+NoteOn:     tax                 ; X is the index in frequency table
             lda FreqTable,x     ; A is the frequency to play
-            sta VOICE           ; Play the voice
+            sta VOICE,y         ; Play the voice
+            iny
+            jsr CheckBit
+            ora LAST_VOICE
+            and #$0F
+            asl LAST_VOICE
+            asl LAST_VOICE
+            asl LAST_VOICE
+            asl LAST_VOICE
+            ora LAST_VOICE
+            sta LAST_VOICE
             jmp Main            ; Back for more MIDI messages
+
+GetNote:    cpx #74
+            bcs Soprano
+            cpx #36
+            bcc Alto
+            ldy #1
+            clv
+GetLoop:    php
+            txa
+            cmp LAST_NOTE,y     ; X is the note. Is it the last one played?
+            beq GotNote
+            plp
+            bmi GotLoop         ; If not, leave it alone
+            dey
+            bvc GetLoop
+GotLoop:    lda LAST_VOICE
+            eor #7
+            and #7
+            jsr GetVoice
+            cpy #0
+            bpl NoteDone
+            lda LAST_VOICE
+            lsr
+            lsr
+            lsr
+            lsr
+            eor #7
+            and #7
+            jsr GetVoice
+            cpy #0
+            bpl NoteDone
+            lda #7
+            jsr GetVoice
+            cpy #0
+NoteDone:   jsr sev
+            rts
+Alto:       ldy #$FF
+            bmi CheckNote
+Soprano:    ldy #1
+CheckNote:  clv
+            txa
+            cmp LAST_NOTE,y
+            beq Playing
+            jsr sev
+            .byte $80
+GotNote:    plp
+Playing:    iny
+            rts
+
+GetVoice:   cpx #47
+            bcs MaybeSop
+            and #3
+MaybeSop:   cpx #62
+            bcc MaybeAlto
+            and #6
+MaybeAlto:  cpx #35
+            bcs MaybeTenor
+            and #5
+MaybeTenor: cpx #74
+            bcc PickVoice
+            and #5
+PickVoice:  ldy #$FF
+            cmp #0
+            beq VoiceDone
+TestVoice:  iny
+            lsr
+            bcc TestVoice
+VoiceDone:  rts
+
+CheckBit:   lda #$11
+            iny
+            .byte $80
+BitLoop:    asl
+            dey
+            bne BitLoop
+            rts
+
+sev:        pha
+            php
+            pla
+            ora #$40
+            pha
+            plp
+            pla
+            rts
             
 
 ; NMI Interrupt Service Routine
