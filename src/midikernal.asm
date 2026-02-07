@@ -96,10 +96,17 @@
 ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+#ifdef MAPLIN
+#define MAPLIN_COMMON
+#endif
+#ifdef MAPLIN_WITH_IRQ
+#define MAPLIN_COMMON
+#endif
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; LABEL DEFINITIONS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-#ifdef MAPLIN
+#ifdef MAPLIN_COMMON
 MC6850      = $9C00
 IOPORT      = MC6850+1
 #else
@@ -157,7 +164,7 @@ PITCHB:     jmp _PITCHB         ; Pitch bend                                001b
 
 ; MIDI In
 MIDIINIT:                       ; Alias for SETIN
-#ifdef MAPLIN
+#ifdef MAPLIN_COMMON
             jmp _MIDIINIT
 #endif
 SETIN:      jmp _SETIN          ; Set MIDI port to input mode               001e
@@ -177,10 +184,8 @@ GETMSG:     jmp _GETMSG         ; Get complete MIDI message                 0036
 ; Prepare port for MIDI output
 ; Preparations - None
 ; Registers Affected - None
-#ifdef MAPLIN
+#ifdef MAPLIN_COMMON
 _MIDIINIT:  lda #$03
-            sta MC6850
-            lda #$16
             sta MC6850
 _SETIN:
 #else
@@ -206,8 +211,13 @@ _SETIN:     lda #%00000000      ; Set DDR for input on all lines
 #endif
             lda #$ff            ; Initialize message not ready
             sta DATACOUNT       ; ,,
-#ifdef MAPLIN
-_SETOUT:
+#ifdef MAPLIN_COMMON
+#ifdef MAPLIN_WITH_IRQ
+            lda #$96
+            .byte $0C
+#endif
+_SETOUT:    lda #$16
+            sta MC6850
 #endif
             rts
 
@@ -252,8 +262,13 @@ getst_r:    rts
 ; Preparations - SETIN
 ; Registers Affected - A
 ; Return Values - Z flag (clear = new byte at input)
-#ifdef MAPLIN
-_CHKMIDI:   lda #$01
+#ifdef MAPLIN_COMMON
+_CHKMIDI:
+#ifdef MAPLIN_WITH_IRQ
+            lda #$80
+#else
+            lda #$01
+#endif
             bit MC6850
 #else
 _CHKMIDI:   lda #%00001000      ; Check bit 3 of IFR, which indicates
@@ -324,14 +339,14 @@ _MIDIOUT:   pha                 ; Preserve A
             txa                 ; Preserve X during acknowledgement
             pha                 ;   timeout check
             ldx #0              ; X = Timeout counter
-#ifdef MAPLIN
+#ifdef MAPLIN_COMMON
             lda #$02
 #else
             lda #%00010000      ; Wait for bit 4 of the interrupt flag
 #endif
 -wait:      dex                 ; Check for interface timeout
             beq timeout         ; ,,
-#ifdef MAPLIN
+#ifdef MAPLIN_COMMON
             bit MC6850
             bne wait
 #else

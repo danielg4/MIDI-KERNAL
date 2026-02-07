@@ -1,0 +1,9 @@
+EESchema-DOCLIB  Version 2.0
+#
+$CMP Conn_02x22_Number_Row_Letter_Row
+D Generic connector, double row, 02x22, number row letter row pin numbering scheme (pin number consists of a number for pin index in the top row and a letter for the pin index in the bottom row. 1, ..., 22; A, ..., Z))
+K connector
+F ~
+$ENDCMP
+#
+#End Doc Library

@@ -216,9 +216,16 @@ midi:       jsr MAKEMSG         ; Add the byte to a MIDI message
 ; Frequency numbers VIC-20
 ; 135 = Note #48
 ; Between 48 and 85
+#ifndef PAL ;NTSC timings
 FreqTable:  .byte 135,143,147,151,159,163,167,175,179,183,187,191
             .byte 195,199,201,203,207,209,212,215,217,219,221,223
             .byte 225,227,228,229,231,232,233,235,236,237,238,239
             .byte 240,241
+#else       ;PAL timings
+FreqTable:  .byte 128,134,141,147,153,159,164,170,174,179,183,187,
+            .byte 191,195,198,201,204,207,210,213,215,217,219,221,
+            .byte 223,225,227,228,230,231,232,234,235,236,237,238,
+            .byte 239,240
+#endif
 
 #include "midikernal.asm"
