@@ -14,6 +14,17 @@ VOICE       = $900b             ; Middle Voice Register
 LAST_NOTE   = $fc               ; Last note played
 LAST_VOICE  = $fe
 
+#ifdef PAL
+#define FLOORADJ 1
+#else
+#define FLOORADJ 0
+#endif
+#ifdef ALT
+#define CEILADJ 10
+#else
+#define CEILADJ 0
+#endif
+
 * = $1600
 ; Installation routine
 #ifdef MAPLIN
@@ -74,9 +85,9 @@ NoteOffH:   jsr GetNote
 ;     cmp #LISTEN_CH
 ;     beq ch_ok
 ;     jmp Main   
-NoteOnOffH: cpx #85             ; Check the range for the VIC-20 frequency
+NoteOnOffH: cpx #85-CEILADJ     ; Check the range for the VIC-20 frequency
             bcs Main            ;   table. We're allowing note #s 24-85 in
-            cpx #24             ;   this simple demo
+            cpx #24+FLOORADJ    ;   this simple demo
             bcc Main            ;   ,,
             tya                 ; Put the velocity in A
             beq NoteOffH
@@ -113,9 +124,9 @@ NoteOn:     tax                 ; X is the index in frequency table
             sta LAST_VOICE
             jmp Main            ; Back for more MIDI messages
 
-GetNote:    cpx #74
+GetNote:    cpx #74-CEILADJ
             bcs Soprano
-            cpx #36
+            cpx #36+FLOORADJ
             bcc Alto
             ldy #1
             clv
@@ -161,16 +172,16 @@ GotNote:    plp
 Playing:    iny
             rts
 
-GetVoice:   cpx #47
+GetVoice:   cpx #47-CEILADJ
             bcs MaybeSop
             and #3
-MaybeSop:   cpx #62
+MaybeSop:   cpx #62+FLOORADJ
             bcc MaybeAlto
             and #6
-MaybeAlto:  cpx #35
+MaybeAlto:  cpx #35-CEILADJ
             bcs MaybeTenor
             and #5
-MaybeTenor: cpx #74
+MaybeTenor: cpx #74+FLOORADJ
             bcc PickVoice
             and #5
 PickVoice:  ldy #$FF
@@ -214,6 +225,14 @@ midi:       jsr MAKEMSG         ; Add the byte to a MIDI message
             jmp $ff56           ; Restore registers and return from interrupt
 
 ; Frequency numbers VIC-20
+#ifdef ALT
+; http://sleepingelephant.com/ipw-web/bulletin/bb/viewtopic.php?p=43437#p43437
+FreqTable:  .byte 255,134,141,147,153,159,164,170,174,179,183,187
+            .byte 191,195,198,201,204,207,210,212,215,217,219,221
+            .byte 223,225,226,228,230,231,232,234,235,236,237,238
+            .byte 239,240
+#else
+#ifndef TRUEFREQ                ; Below are the "official" numbers
 ; 135 = Note #48
 ; Between 48 and 85
 #ifndef PAL ;NTSC timings
@@ -226,6 +245,20 @@ FreqTable:  .byte 128,134,141,147,153,159,164,170,174,179,183,187,
             .byte 191,195,198,201,204,207,210,213,215,217,219,221,
             .byte 223,225,227,228,230,231,232,234,235,236,237,238,
             .byte 239,240
+#endif
+#else                           ; Derived from pp.216-217 of the Prog Ref Manual
+#ifndef PAL ;NTSC timings
+FreqTable:  .byte 133,140,146,152,158,163,169,173,178,182,186,190
+            .byte 194,197,201,204,207,209,212,214,217,219,221,223
+            .byte 224,226,228,229,231,232,233,235,236,237,238,239
+            .byte 240,241
+#else       ;PAL timings
+FreqTable:  .byte 123,130,137,144,150,156,161,167,172,176,181,185
+            .byte 189,193,196,199,202,205,208,211,213,216,218,220
+            .byte 222,224,226,227,229,230,232,233,234,235,236,237
+            .byte 238,239
+#endif
+#endif
 #endif
 
 #include "midikernal.asm"

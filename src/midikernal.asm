@@ -110,9 +110,22 @@
 MC6850      = $9C00
 IOPORT      = MC6850+1
 #else
+#ifdef VICMIDI
+; ST16C450 Registers  (IO3)
+IOPORT      = $9C00
+UART_IER    = $9C01
+UART_ISR    = $9C02
+UART_LCR    = $9C03
+UART_MCR    = $9C04
+UART_LSR    = $9C05
+UART_SPR    = $9C07
+UART_DIV_LO = $9C00
+UART_DIV_HI = $9C01
+#else
 ; VIA Registers (VIA#1, Port B)
-DDR         = $9112             ; Data Direction Register
 IOPORT      = $9110             ; User Port
+#endif
+DDR         = $9112             ; Data Direction Register
 PCR         = $911c             ; Peripheral Control Register
 IFR         = $911d             ; Interrupt flag register
 IER         = $911e             ; Interrupt enable register
@@ -163,10 +176,6 @@ CHPRES:     jmp _CHPRES         ; Channel pressure                          0018
 PITCHB:     jmp _PITCHB         ; Pitch bend                                001b
 
 ; MIDI In
-MIDIINIT:                       ; Alias for SETIN
-#ifdef MAPLIN_COMMON
-            jmp _MIDIINIT
-#endif
 SETIN:      jmp _SETIN          ; Set MIDI port to input mode               001e
 GETCH:      jmp _GETCH          ; Get MIDI channel for message              0021
 SETST:      jmp _SETST          ; Set MIDI status and channel               0024
@@ -177,6 +186,8 @@ MAKEMSG:    jmp _MAKEMSG        ; Add incoming byte to MIDI message         0030
 MSGSIZE:    jmp _MSGSIZE        ; Get size of MIDI message                  0033
 GETMSG:     jmp _GETMSG         ; Get complete MIDI message                 0036
 
+MIDIINIT:   jmp _MIDIINIT       ; Otherwise an alias for SETIN              0039
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ; MIDI ROUTINE IMPLEMENTATIONS
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -184,18 +195,23 @@ GETMSG:     jmp _GETMSG         ; Get complete MIDI message                 0036
 ; Prepare port for MIDI output
 ; Preparations - None
 ; Registers Affected - None
-#ifdef MAPLIN_COMMON
-_MIDIINIT:  lda #$03
-            sta MC6850
-_SETIN:
-#else
 _SETOUT:    pha                 ; Save A for command, etc.
+#ifdef MAPLIN_COMMON
+            lda #$16
+            sta MC6850
+#else
+#ifdef VICMIDI
+            lda #$00
+            sta UART_IER
+#else
             lda #%11111111      ; Set DDR for output on all lines
             sta DDR             ; ,,
             lda #%10000000      ; Set PCR for output handshaking mode
             sta PCR             ; ,,
             lda #%00001000      ; Disable CB2 interrupt
             sta IER             ; ,,
+#endif
+#endif
             pla
             rts
 
@@ -203,22 +219,42 @@ _SETOUT:    pha                 ; Save A for command, etc.
 ; Prepare port for MIDI input
 ; Preparations - None
 ; Registers Affected - A
+#ifdef MAPLIN_COMMON
+_MIDIINIT:  lda #$03
+            sta MC6850
+#ifdef MAPLIN_WITH_IRQ
+_SETIN:     lda #$96
+#else
+_SETIN:     lda #$16
+#endif
+            sta MC6850
+#else
+_MIDIINIT:
+#ifdef VICMIDI
+-SETIN:     lda #$80
+            sta UART_LCR
+            lda #$00
+            sta UART_DIV_HI
+            ;lda #$04  ; For 2MHz  crystal   (Original protype from Francois) 
+            ;lda #$08  ; For 4MHz  crystal   (Prototype from Brain)
+            lda #$25   ; For 18MHz crystal   (Pre-production cartridge from Brain)
+            sta UART_DIV_LO
+            lda #$03
+            sta UART_LCR
+            lda #$04
+            sta UART_MCR
+            lda #$01
+            sta UART_IER
+#else
 _SETIN:     lda #%00000000      ; Set DDR for input on all lines
             sta DDR             ; ,,
             sta PCR             ; Set PCR for interrupt input mode
             lda #%10001000      ; Enable CB2 interrupt
             sta IER             ; ,,
 #endif
+#endif
             lda #$ff            ; Initialize message not ready
             sta DATACOUNT       ; ,,
-#ifdef MAPLIN_COMMON
-#ifdef MAPLIN_WITH_IRQ
-            lda #$96
-            .byte $0C
-#endif
-_SETOUT:    lda #$16
-            sta MC6850
-#endif
             rts
 
 ; SETCH
@@ -271,8 +307,17 @@ _CHKMIDI:
 #endif
             bit MC6850
 #else
+#ifdef VICMIDI
+_CHKMIDI:   lda #$01
+            bit UART_LSR
+            beq no_msg
+            php
+            lda UART_ISR
+            plp
+#else
 _CHKMIDI:   lda #%00001000      ; Check bit 3 of IFR, which indicates
             bit IFR             ;   that the interface has written to the port
+#endif
 #endif
             rts
             
@@ -342,17 +387,24 @@ _MIDIOUT:   pha                 ; Preserve A
 #ifdef MAPLIN_COMMON
             lda #$02
 #else
+#ifdef VICMIDI
+            lda #$20
+#else
             lda #%00010000      ; Wait for bit 4 of the interrupt flag
+#endif
 #endif
 -wait:      dex                 ; Check for interface timeout
             beq timeout         ; ,,
 #ifdef MAPLIN_COMMON
             bit MC6850
-            bne wait
+#else
+#ifdef VICMIDI
+            bit UART_LSR
 #else
             bit IFR             ; Check interrupt flag for acknowledgement
-            beq wait            ;   of MIDI message by the interface
 #endif
+#endif
+            beq wait            ;   of MIDI message by the interface
             clc
             .byte $34           ; Skip Byte (SKB)
 timeout:    sec
