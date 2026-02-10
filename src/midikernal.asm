@@ -229,9 +229,16 @@ _SETIN:     lda #$16
 #endif
             sta MC6850
 #else
-_MIDIINIT:
 #ifdef VICMIDI
--SETIN:     lda #$80
+_MIDIINIT:  lda #$55
+            sta UART_SPR
+            lda UART_SPR
+            cmp #$55
+            beq _SETIN
+            clv
+wait4stop:  inc $900f
+            bvc wait4stop
+_SETIN:     lda #$80
             sta UART_LCR
             lda #$00
             sta UART_DIV_HI
@@ -246,6 +253,7 @@ _MIDIINIT:
             lda #$01
             sta UART_IER
 #else
+_MIDIINIT:
 _SETIN:     lda #%00000000      ; Set DDR for input on all lines
             sta DDR             ; ,,
             sta PCR             ; Set PCR for interrupt input mode
@@ -310,7 +318,7 @@ _CHKMIDI:
 #ifdef VICMIDI
 _CHKMIDI:   lda #$01
             bit UART_LSR
-            beq no_msg
+            beq no_data
             php
             lda UART_ISR
             plp
@@ -319,7 +327,7 @@ _CHKMIDI:   lda #%00001000      ; Check bit 3 of IFR, which indicates
             bit IFR             ;   that the interface has written to the port
 #endif
 #endif
-            rts
+no_data:    rts
             
 ; MIDIIN
 ; Receive byte from MIDI port in A
