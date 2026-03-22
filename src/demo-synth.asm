@@ -19,10 +19,20 @@ LAST_VOICE  = $fe
 #else
 #define FLOORADJ 0
 #endif
-#ifdef ALT
-#define CEILADJ 10
+#ifdef TRUEFREQ
+#define CEILADJ 1
 #else
 #define CEILADJ 0
+#endif
+#undef REVERSE_REGISTERS
+#define REVERSE_REGISTERS
+#undef NOTE_PRIORITY
+#ifdef HIGH_NOTE_PRIORITY
+#undef LOW_NOTE_PRIORITY
+#define NOTE_PRIORITY
+#endif
+#ifdef LOW_NOTE_PRIORITY
+#define NOTE_PRIORITY
 #endif
 
 * = $1600
@@ -36,10 +46,10 @@ Install:    lda #<ISR           ; Set the location of the NMI interrupt service
 #endif
             jsr MIDIINIT
             jsr SETIN           ; Prepare hardware for MIDI input
-            ldx #0
-            ldy #2
-InitLoop:   stx LAST_NOTE,y
-            dey
+            ldx #2
+            ldy #0
+InitLoop:   sty LAST_NOTE,x
+            dex
             bpl InitLoop
             ; Fall through to Main
  
@@ -63,13 +73,54 @@ Main:       jsr GETMSG          ; Has a complete MIDI message been received?
             bne Main            ; Go back and wait for more
 
 ; Note Off Handler            
-NoteOffH:   jsr GetNote
+NoteOffH:   tya
+#ifdef PER_CHANNEL_NOTE_OFF
+            pha
+            jsr GETCH
+            tay
+            pla
+            cmp LastTable,y
+            beq KeepMute
+            ldx LastTable,y
+#ifdef HIGH_NOTE_PRIORITY
+            beq KeepMute
+#else
+            bmi KeepMute
+#endif
+            txa
+KeepMute:   tay
+            jsr GetNote
+#else
+            jsr GetNote
+            bvc KeepMute
+            jsr GETCH
+            tay
+            cmp LastTable,y
+            beq Main
+            lda LastTable,y
+#ifdef HIGH_NOTE_PRIORITY
+            beq Main
+#else
+            bmi Main
+#endif
+            tay
+            jsr GetNote
+KeepMute:
+#endif
+            jsr GETCH
+            tay
+#ifdef HIGH_NOTE_PRIORITY
+            lda #0
+#else
+            lda #$ff
+#endif
+            sta LastTable,y
             bvs Main
-            dey
+            dex
             lda #0              ; Otherwise, silence the voice
-            sta VOICE,y         ; ,,
-            sta LAST_NOTE,y
-            iny
+            sta VOICE,x         ; ,,
+            sta LAST_NOTE,x
+            inx
             jsr CheckBit
             eor #$FF
             and LAST_VOICE
@@ -85,11 +136,11 @@ NoteOffH:   jsr GetNote
 ;     cmp #LISTEN_CH
 ;     beq ch_ok
 ;     jmp Main   
-NoteOnOffH: cpx #85-CEILADJ     ; Check the range for the VIC-20 frequency
+NoteOnOffH: cpy #85-CEILADJ     ; Check the range for the VIC-20 frequency
             bcs Main            ;   table. We're allowing note #s 24-85 in
-            cpx #24+FLOORADJ    ;   this simple demo
+            cpy #24+FLOORADJ    ;   this simple demo
             bcc Main            ;   ,,
-            tya                 ; Put the velocity in A
+            txa                 ; Put the velocity in A
             beq NoteOffH
             lsr                 ; Shift 0vvvvvvv -> 00vvvvvv
             lsr                 ;       00vvvvvv -> 000vvvvv
@@ -97,22 +148,46 @@ NoteOnOffH: cpx #85-CEILADJ     ; Check the range for the VIC-20 frequency
             bne setvol          ; Make sure it's at least 1
             lda #1              ; ,,
 setvol:     sta VOLUME          ; Set volume based on high 4 bits of velocity
+NoteOnH:    tya                 ; Put note number in A
+            pha
+            jsr GETCH
+            tay
+            pla
+#ifdef NOTE_PRIORITY
+            cmp LastTable,y
+#ifdef HIGH_NOTE_PRIORITY
+            bcs KeepNote
+#else
+            bcc KeepNote
+#endif
+            tay
             jsr GetNote
-            bmi Main
-            dey
-NoteOnH:    txa                 ; Put note number in A
-            sta LAST_NOTE,y     ; Store last note for Note Off
+            bvs NoMute
+            dex
+            lda #0
+            sta VOICE,x
+            sta LAST_NOTE,x
+NoMute:     jsr GETCH
+            tay
+            lda LastTable,y
+#endif
+KeepNote:   sta LastTable,y
+            tay
+            jsr GetNote
+            dex
+            tya
+            sta LAST_NOTE,x     ; Store last note for Note Off
             sec                 ; Know carry is set from previous cmp
             sbc #24             ; Subtract 24 to get frequency table index
-            cpy #0
+            cpx #0
             bmi NoteOn
             beq Tenor
             sbc #12
 Tenor:      sbc #12
-NoteOn:     tax                 ; X is the index in frequency table
-            lda FreqTable,x     ; A is the frequency to play
-            sta VOICE,y         ; Play the voice
-            iny
+NoteOn:     tay                 ; Y is the index in frequency table
+            lda FreqTable,y     ; A is the frequency to play
+            sta VOICE,x         ; Play the voice
+            inx
             jsr CheckBit
             ora LAST_VOICE
             and #$0F
@@ -124,25 +199,25 @@ NoteOn:     tax                 ; X is the index in frequency table
             sta LAST_VOICE
             jmp Main            ; Back for more MIDI messages
 
-GetNote:    cpx #74-CEILADJ
+GetNote:    cpy #74-CEILADJ
             bcs Soprano
-            cpx #36+FLOORADJ
+            cpy #36+FLOORADJ
             bcc Alto
-            ldy #1
+            ldx #1
             clv
 GetLoop:    php
-            txa
-            cmp LAST_NOTE,y     ; X is the note. Is it the last one played?
+            tya
+            cmp LAST_NOTE,x     ; Y is the note. Is it the last one played?
             beq GotNote
             plp
             bmi GotLoop         ; If not, leave it alone
-            dey
+            dex
             bvc GetLoop
 GotLoop:    lda LAST_VOICE
             eor #7
             and #7
             jsr GetVoice
-            cpy #0
+            cpx #0
             bpl NoteDone
             lda LAST_VOICE
             lsr
@@ -152,51 +227,51 @@ GotLoop:    lda LAST_VOICE
             eor #7
             and #7
             jsr GetVoice
-            cpy #0
+            cpx #0
             bpl NoteDone
             lda #7
             jsr GetVoice
-            cpy #0
+            cpx #0
 NoteDone:   jsr sev
             rts
-Alto:       ldy #$FF
+Alto:       ldx #$FF
             bmi CheckNote
-Soprano:    ldy #1
+Soprano:    ldx #1
 CheckNote:  clv
-            txa
-            cmp LAST_NOTE,y
+            tya
+            cmp LAST_NOTE,x
             beq Playing
             jsr sev
             .byte $80
 GotNote:    plp
-Playing:    iny
+Playing:    inx
             rts
 
-GetVoice:   cpx #47-CEILADJ
+GetVoice:   cpy #47+FLOORADJ
             bcs MaybeSop
             and #3
-MaybeSop:   cpx #62+FLOORADJ
+MaybeSop:   cpy #62-CEILADJ
             bcc MaybeAlto
             and #6
-MaybeAlto:  cpx #35-CEILADJ
+MaybeAlto:  cpy #35+FLOORADJ
             bcs MaybeTenor
             and #5
-MaybeTenor: cpx #74+FLOORADJ
+MaybeTenor: cpy #74-CEILADJ
             bcc PickVoice
             and #5
-PickVoice:  ldy #$FF
+PickVoice:  ldx #$FF
             cmp #0
             beq VoiceDone
-TestVoice:  iny
+TestVoice:  inx
             lsr
             bcc TestVoice
 VoiceDone:  rts
 
 CheckBit:   lda #$11
-            iny
+            inx
             .byte $80
 BitLoop:    asl
-            dey
+            dex
             bne BitLoop
             rts
 
@@ -225,13 +300,6 @@ midi:       jsr MAKEMSG         ; Add the byte to a MIDI message
             jmp $ff56           ; Restore registers and return from interrupt
 
 ; Frequency numbers VIC-20
-#ifdef ALT
-; http://sleepingelephant.com/ipw-web/bulletin/bb/viewtopic.php?p=43437#p43437
-FreqTable:  .byte 255,134,141,147,153,159,164,170,174,179,183,187
-            .byte 191,195,198,201,204,207,210,212,215,217,219,221
-            .byte 223,225,226,228,230,231,232,234,235,236,237,238
-            .byte 239,240
-#else
 #ifndef TRUEFREQ                ; Below are the "official" numbers
 ; 135 = Note #48
 ; Between 48 and 85
@@ -241,9 +309,10 @@ FreqTable:  .byte 135,143,147,151,159,163,167,175,179,183,187,191
             .byte 225,227,228,229,231,232,233,235,236,237,238,239
             .byte 240,241
 #else       ;PAL timings
-FreqTable:  .byte 128,134,141,147,153,159,164,170,174,179,183,187,
-            .byte 191,195,198,201,204,207,210,213,215,217,219,221,
-            .byte 223,225,227,228,230,231,232,234,235,236,237,238,
+; http://sleepingelephant.com/ipw-web/bulletin/bb/viewtopic.php?p=43437#p43437
+FreqTable:  .byte 255,134,141,147,153,159,164,170,174,179,183,187
+            .byte 191,195,198,201,204,207,210,212,215,217,219,221
+            .byte 223,225,226,228,230,231,232,234,235,236,237,238
             .byte 239,240
 #endif
 #else                           ; Derived from pp.216-217 of the Prog Ref Manual
@@ -259,6 +328,11 @@ FreqTable:  .byte 123,130,137,144,150,156,161,167,172,176,181,185
             .byte 238,239
 #endif
 #endif
+            .byte 0
+#ifdef HIGH_NOTE_PRIORITY
+LastTable:  .dsb 16,0
+#else
+LastTable:  .dsb 16,255
 #endif
 
 #include "midikernal.asm"

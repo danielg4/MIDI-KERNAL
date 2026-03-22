@@ -96,10 +96,12 @@
 ;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-#ifdef MAPLIN
-#define MAPLIN_COMMON
-#endif
+#undef MAPLIN_COMMON
 #ifdef MAPLIN_WITH_IRQ
+#define MAPLIN_COMMON
+#undef MAPLIN
+#endif
+#ifdef MAPLIN
 #define MAPLIN_COMMON
 #endif
 
@@ -278,6 +280,13 @@ _SETCH:     and #%00001111      ; Constrain to 0-15
 ; Registers Affected - A
 ; Return Values - MIDI Channel in A
 _GETCH:     lda MIDIST
+            and #$f0
+            eor #$f0
+            php
+            eor #$ff
+            plp
+            beq getst_r
+            lda MIDIST
             and #%00001111
             rts
             
@@ -374,10 +383,18 @@ _CONTROLC:  lda #ST_CONTROLC
                      
 MIDICMD:    ora MIDIST          ; Generic endpoint for a typical
             jsr MIDIOUT         ;   three-byte MIDI command
+#ifndef REVERSE_REGISTERS
             txa                 ;   with Data 1 in X, and
+#else
+            tya
+#endif
             and #%01111111      ;   ,, (constrain to 0-127)
             jsr MIDIOUT         ;   ,,
+#ifndef REVERSE_REGISTERS
             tya                 ;   Data 2 in Y
+#else
+            txa
+#endif
             and #%01111111      ;   ,, (constrain to 0-127)
             ; Fall through to _MIDIOUT
             
@@ -510,8 +527,13 @@ _GETMSG:    clc                 ; Default to carry clear (no message)
             ldx DATA2           ;   byte is in DATA2, so set X appropriately
             cmp #1              ; Otherwise, set X with DATA1 and Y with
             beq set_rst         ;   DATA2
+#ifndef REVERSE_REGISTERS
             ldx DATA1           ;   ,,
             ldy DATA2           ;   ,,
+#else
+            ldy DATA1           ;   ,,
+            ldx DATA2           ;   ,,
+#endif
 set_rst:    pla                 ; Put status back in A            
             dec DATACOUNT       ; Set message from 0 to "unstarted" ($ff)
             sec                 ; Set carry to indicate message is ready
