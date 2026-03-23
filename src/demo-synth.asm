@@ -9,6 +9,7 @@
 ; VIC Registers
 VOLUME      = $900e             ; Volume Register
 VOICE       = $900b             ; Middle Voice Register
+NOISE       = $900d
 
 ; Program Memory
 LAST_NOTE   = $fc               ; Last note played
@@ -20,7 +21,7 @@ LAST_VOICE  = $fe
 #define FLOORADJ 0
 #endif
 #ifdef TRUEFREQ
-#define CEILADJ 1
+#define CEILADJ 2-FLOORADJ
 #else
 #define CEILADJ 0
 #endif
@@ -88,9 +89,30 @@ NoteOffH:   tya
             bmi KeepMute
 #endif
             txa
-KeepMute:   tay
+KeepMute:   cpy #9
+            bne NotDrumOff
+DrumOff:    cmp LastTable,y
+            bne Main
+            jsr ClearCh
+            lda #0
+            sta NOISE
+            beq Main
+NotDrumOff: tay
             jsr GetNote
 #else
+            pha
+            jsr GETCH
+            tay
+            pla
+            cpy #9
+            bne NotDrumOff
+DrumOff:    cmp LastTable,y
+            bne Main
+            jsr ClearCh
+            lda #0
+            sta NOISE
+            beq Main
+NotDrumOff: tay
             jsr GetNote
             bvc KeepMute
             jsr GETCH
@@ -109,12 +131,7 @@ KeepMute:
 #endif
             jsr GETCH
             tay
-#ifdef HIGH_NOTE_PRIORITY
-            lda #0
-#else
-            lda #$ff
-#endif
-            sta LastTable,y
+            jsr ClearCh
             bvs Main
             dex
             lda #0              ; Otherwise, silence the voice
@@ -125,7 +142,7 @@ KeepMute:
             eor #$FF
             and LAST_VOICE
             sta LAST_VOICE
-            jmp Main            ; Go get more MIDI
+Main1:      jmp Main            ; Go get more MIDI
 
 ; Note On Handler  
 ; For the purposes of this demo, we're just accepting notes on any channel.
@@ -136,10 +153,28 @@ KeepMute:
 ;     cmp #LISTEN_CH
 ;     beq ch_ok
 ;     jmp Main   
-NoteOnOffH: cpy #85-CEILADJ     ; Check the range for the VIC-20 frequency
-            bcs Main            ;   table. We're allowing note #s 24-85 in
+NoteOnOffH: jsr GETCH
+            cmp #9
+            bne NotDrumOn
+            cpy #74-CEILADJ
+            bcs Main
+            cpy #36+FLOORADJ
+            bcc Main
+            cpx #0
+            beq DrumsOff
+            tya
+            ldy #9
+            sta LastTable,y
+            sec
+            sbc #36
+            tay
+            lda FreqTable,y
+            sta NOISE
+            bne Main1
+NotDrumOn:  cpy #86-CEILADJ     ; Check the range for the VIC-20 frequency
+            bcs Main1           ;   table. We're allowing note #s 24-85 in
             cpy #24+FLOORADJ    ;   this simple demo
-            bcc Main            ;   ,,
+            bcc Main1           ;   ,,
             txa                 ; Put the velocity in A
             beq NoteOffH
             lsr                 ; Shift 0vvvvvvv -> 00vvvvvv
@@ -199,6 +234,23 @@ NoteOn:     tay                 ; Y is the index in frequency table
             sta LAST_VOICE
             jmp Main            ; Back for more MIDI messages
 
+DrumsOff:   tax
+            tya
+            pha
+            txa
+            tay
+            pla
+            jmp DrumOff
+
+ClearCh:
+#ifdef HIGH_NOTE_PRIORITY
+            lda #0
+#else
+            lda #$ff
+#endif
+            sta LastTable,y
+            rts
+
 GetNote:    cpy #74-CEILADJ
             bcs Soprano
             cpy #36+FLOORADJ
@@ -247,13 +299,13 @@ GotNote:    plp
 Playing:    inx
             rts
 
-GetVoice:   cpy #47+FLOORADJ
+GetVoice:   cpy #48+FLOORADJ
             bcs MaybeSop
             and #3
 MaybeSop:   cpy #62-CEILADJ
             bcc MaybeAlto
             and #6
-MaybeAlto:  cpy #35+FLOORADJ
+MaybeAlto:  cpy #36+FLOORADJ
             bcs MaybeTenor
             and #5
 MaybeTenor: cpy #74-CEILADJ

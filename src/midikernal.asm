@@ -244,7 +244,7 @@ _SETIN:     lda #$80
             sta UART_LCR
             lda #$00
             sta UART_DIV_HI
-            ;lda #$04  ; For 2MHz  crystal   (Original protype from Francois) 
+            ;lda #$04  ; For 2MHz  crystal   (Original protype from Francois)
             ;lda #$08  ; For 4MHz  crystal   (Prototype from Brain)
             lda #$25   ; For 18MHz crystal   (Pre-production cartridge from Brain)
             sta UART_DIV_LO
